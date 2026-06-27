@@ -16,59 +16,61 @@ class Usertime(commands.Cog):
         self.bot = bot
 
     async def _get_time_logic(self, ctx, user: discord.User):
-        userid = str(user.id)
-        tz_info = user_timezones.find_one({"userid": userid})
-
+        tz_info = user_timezones.find_one({"userid": str(user.id)})
         if not tz_info:
+            if ctx.author.id != user.id:
+                extra = "\nAsk them to set their timezone with `/add`"
+            else:
+                extra = "\nTake the moment to set it with `/add`!"
             await ctx.respond(
-                f"""{user.mention}'s timezone is not set.\nUse the command `/add` to set their timezone.""",
+                f"{user.mention}'s timezone is not set." + extra,
                 ephemeral=True
             )
             return
-
         try:
-            tz = pytz.timezone(tz_info["timezone"])
-            now = datetime.now(tz)
+            now = datetime.now(pytz.timezone(tz_info["timezone"]))
             formatted_time = now.strftime('%A, %B %d, %Y at %I:%M %p %Z')
-
             await ctx.respond(
                 f"🕒 {user.mention}'s current time:\n**{formatted_time}**",
                 ephemeral=True
             )
         except Exception as e:
             await ctx.respond("Error getting time.", ephemeral=True)
-            print(f"[Error getting time for {user.id}]: {e}")
+            raise
 
     async def _set_timezone_logic(self, ctx, user: discord.User, timezone: str):
-        userid = str(user.id)
+        if ctx.author.id == user.id or ctx.author.id in self.bot.owner_ids:
+            try:
+                pytz.timezone(timezone)
+            except pytz.UnknownTimeZoneError:
+                await ctx.respond(
+                    "❌ Invalid timezone.\nPlease provide a [valid timezone](https://gist.github.com/heyalexej/8bf688fd67d7199be4a1682b3eec7568) (e.g., `America/Bogota`).",
+                    ephemeral=True
+                )
+                return
 
-        # Validate timezone
-        try:
-            pytz.timezone(timezone)
-        except pytz.UnknownTimeZoneError:
-            await ctx.respond(
-                "❌ Invalid timezone. Please provide a valid timezone (e.g., `America/Bogota`).",
-                ephemeral=True
-            )
-            return
+            existing_entry = user_timezones.find_one({"userid": str(user.id)})
 
-        existing_entry = user_timezones.find_one({"userid": userid})
-
-        if existing_entry:
-            user_timezones.update_one(
-                {"userid": userid},
-                {"$set": {"timezone": timezone}}
-            )
-            await ctx.respond(
-                f"✅ {user.mention}'s timezone has been **updated** to `{timezone}`.",
-                ephemeral=True
-            )
+            if existing_entry:
+                existing_tz = existing_entry["timezone"]
+                user_timezones.update_one(
+                    {"userid": str(user.id)},
+                    {"$set": {"timezone": timezone}}
+                )
+                await ctx.respond(
+                    f"✅ {user.mention}'s timezone has been **updated**.\nBefore: `{existing_tz}`\nAfter: `{timezone}`.",
+                    ephemeral=True
+                )
+            else:
+                user_timezones.insert_one(
+                    {"userid": str(user.id), "timezone": timezone})
+                await ctx.respond(
+                    f"✅ {user.mention}'s timezone has been **set** to `{timezone}`.",
+                    ephemeral=True
+                )
         else:
-            user_timezones.insert_one({"userid": userid, "timezone": timezone})
-            await ctx.respond(
-                f"✅ {user.mention}'s timezone has been **set** to `{timezone}`.",
-                ephemeral=True
-            )
+            await ctx.respond("❌ You can't update other people's timezones.",
+                              ephemeral=True)
 
     @commands.user_command(
         name="Check the user's time",
@@ -96,7 +98,7 @@ class Usertime(commands.Cog):
                         description="Timezone to set",
                         autocomplete=timezone_autocomplete
                     ),
-                    user: discord.User
+                    user: discord.User = None
                     ):
         if user is None:
             user = ctx.author
@@ -110,19 +112,22 @@ class Usertime(commands.Cog):
     async def remove_tz(self, ctx, user: discord.User = None):
         if user is None:
             user = ctx.author
-        userid = str(user.id)
-        result = user_timezones.delete_one({"userid": userid})
+        if ctx.author.id == user.id or ctx.author.id in self.bot.owner_ids:
+            result = user_timezones.delete_one({"userid": str(user.id)})
 
-        if result.deleted_count:
-            await ctx.respond(
-                f"✅ Removed timezone for {user.mention}.",
-                ephemeral=True
-            )
+            if result.deleted_count:
+                await ctx.respond(
+                    f"✅ Removed timezone for {user.mention}.",
+                    ephemeral=True
+                )
+            else:
+                await ctx.respond(
+                    f"❌ {user.mention} doesn't have a timezone set.",
+                    ephemeral=True
+                )
         else:
-            await ctx.respond(
-                f"❌ {user.mention} doesn't have a timezone set.",
-                ephemeral=True
-            )
+            await ctx.respond("❌ You can't update other people's timezones.",
+                              ephemeral=True)
 
 
 def setup(bot):

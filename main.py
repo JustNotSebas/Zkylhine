@@ -7,8 +7,13 @@ import pytz  # pip install pytz
 
 load_dotenv()
 
+if None in (os.getenv("TOKEN"), os.getenv("DB_URL")):
+    print("!! | Critical environment variable missing from .env, aborting startup.")
+    exit(1)
+if os.getenv("TIMEZONE") is None:
+    print("!! | Timezone missing from .env, bot will default to UTC.")
 bot = commands.Bot(intents=discord.Intents.default(), auto_sync_commands=True)
-bot.tz = pytz.timezone(os.getenv("TIMEZONE"))
+bot.tz = pytz.timezone(os.getenv("TIMEZONE") or "UTC")
 bot.start_time = datetime.now(bot.tz)
 
 extensions = [  # Auto-load all command files in cmds/ directory
@@ -24,16 +29,21 @@ async def on_connect():  # Load extensions and print bot info on connect
     User: {bot.user.name}
     ID: {bot.user.id}
         """)
-
-    if extensions and not hasattr(bot, 'synced'):
-        print("★ | Loading extensions...")
-        for ext in extensions:
-            try:
-                bot.load_extension(ext)
-                print(f"✓ | Loaded {ext}")
-            except Exception as e:
-                print(f"✗ | Failed to load {ext}: {e}")
-        print()
+    if not hasattr(bot, 'synced'):
+        info = await bot.application_info()
+        if extensions:
+            print("★ | Loading extensions...")
+            for ext in extensions:
+                try:
+                    bot.load_extension(ext)
+                    print(f"✓ | Loaded {ext}")
+                except Exception as e:
+                    print(f"✗ | Failed to load {ext}: {e}")
+            print()
+        if info.team:
+            bot.owner_ids = {m.id for m in info.team.members}
+        else:
+            bot.owner_ids = {info.owner.id}
 
 
 @bot.event
@@ -42,8 +52,6 @@ async def on_ready():  # Print bot info on ready
         await bot.sync_commands(force=True)
         bot.synced = True
         print("✓ | Commands synced.")
-
-    print("January 25th 2026: You still can't retrieve the user count directly.")
     print(f"✓ | Ready! Ping: {round(bot.latency * 1000)}ms")
 
 
@@ -83,5 +91,6 @@ async def on_application_command_error(ctx, error):
 
     if ctx.interaction.response.is_done():
         return
+    await ctx.respond(f"Something went wrong. Debug info: {type(error).__module__}.{type(error).__name__}", ephemeral=True)
 
 bot.run(os.getenv("TOKEN"))
